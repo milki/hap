@@ -1,0 +1,174 @@
+#!/usr/bin/perl
+
+# the only line you might need to change:
+my $dlist = "$ENV{HOME}/imli/private/.hashapass.dlist";
+
+# Usage: $0 domain-name [password-length]
+# see bottom of file for documentation
+
+# ----------------------------------------
+# usual preamble, modules, etc.
+
+use strict;
+use warnings;
+use v5.10;  # I'm starting to use 'say'
+use Data::Dumper;
+$Data::Dumper::Indent = 1;
+$Data::Dumper::Sortkeys = 1;
+
+sub dbg { return unless $ENV{D}; print STDERR "DEBUG: ", join("\nDebug: ", @_), "\n"; }
+
+our %dlist;
+# structure: $dlist{domain}{notes} = <timestamp in epoch_seconds>
+my ($salt, $mp, $notes);
+
+usage() unless (@ARGV);
+
+# ----------------------------------------
+# arguments; arg-1 is domain, optional arg-2 is password length
+
+my $domain = shift;
+
+my $pwlen;
+$pwlen = shift if @ARGV;
+$pwlen ||= 14;
+dbg("pwlen=$pwlen");
+
+# ----------------------------------------
+# remind user about any domains that match the domain name he entered, as well
+# as, for each such domain, any notes he saved
+
+grep_dlist($domain);
+
+# ----------------------------------------
+# ask for the salt, if any, and the master password.
+
+print "salt (hit enter if no salt): ";
+chomp($salt = <>);
+dbg("salt=$salt");
+
+print "master password (hit enter to abort/exit program): ";
+$mp = read_s();
+exit unless $mp;
+
+dbg("domain=$domain salt=$salt");
+
+# ----------------------------------------
+# the main computation.  Or at least a call to it :)
+
+my $sha = gen_pw("$domain$salt", $mp, $pwlen);
+dbg("sha=$sha");
+
+# ----------------------------------------
+
+# the user can choose to save some notes about this password, possibly to jog
+# his memory.  Typical things to save are the salt used (or a hint about it,
+# if you're paranoid), the key length (if you overrode the default), etc.
+# Anything except the master password ;-)
+print "notes to save: ";
+chomp($notes = <>);
+if ($notes) {
+    $dlist{$domain}{$notes} = time();
+    write_dlist();
+}
+
+# ----------------------------------------
+
+# we're all done.  Print the sha.
+say $sha;
+# if $DISPLAY is set, set the X selection, wait, and clear it
+if ($ENV{DISPLAY}) {
+    system("echo -n '$sha' | xsel");
+    # clear out xsel if done (or user can Ctrl-C out)
+    print "X selection buffer set; press enter to clear it:";
+    <>;
+    my $dummy = '#' x $pwlen;
+    system("echo -n '$dummy' | xsel");
+}
+
+# ----------------------------------------
+#   subroutines
+# ----------------------------------------
+
+sub usage {
+    say "Usage: $0 domain [password length]";
+    exit 1;
+}
+
+sub grep_dlist {
+    my $domain = shift;
+
+    read_dlist() unless %dlist;
+
+    for my $d (sort keys %dlist) {
+        next unless $d =~ /$domain/;
+        say $d;
+        for my $s (sort keys %{ $dlist{$d} }) {
+            say "\t" . localtime($dlist{$d}{$s}) . "\t$s";
+        }
+    }
+    say "----";
+}
+
+sub read_dlist {
+    unless ( -f $dlist ) {
+        %dlist=();
+        return;
+    }
+    die "goodbye cruel world!\n" unless do $dlist;
+}
+
+sub write_dlist {
+    open(DLIST, ">", $dlist) or die "$dlist: $!";
+    print DLIST Data::Dumper->Dump([\%dlist], [qw(*dlist)]);
+    close DLIST;
+}
+
+# this is much better than fiddling with hard-to-use modules like
+# Term::ReadLine or installing non-core modules like Term::ReadKey.  I've
+# never been a "pure perl" fanatic anyway :-)
+sub read_s {
+    my $in;
+    $in = `read -s foo; echo \$foo`;
+    chomp($in);
+    print "\n";
+    return $in;
+}
+
+sub gen_pw {
+    my ($data, $key, $pwlen) = @_;
+    my $sha;
+
+    if ( eval "use Digest::SHA qw(hmac_sha1_base64); 1" ) {
+        $sha = hmac_sha1_base64($data, $key);
+    } else {
+        $sha = `echo -n '$data' | openssl sha1 -binary -hmac '$key' | openssl base64`;
+    }
+    $sha=substr($sha, 0, $pwlen);
+    return $sha;
+}
+
+__END__
+
+This is my version of 'hashapass' (see http://hashapass.com/cmd.html). The
+main differences are:
+
+  - our keys default to 14 characters, not 8
+  - but you can choose any key length you want
+  - what they call "parameter" we call "domain name" or "domain"
+  - we *may* suffix a "salt" to the domain.  See below for why we use a salt.
+
+If you want to compare 'hap' to hashapass command line, this one is, in bash:
+
+    echo -n "$domain$salt" |
+        openssl sha1 -binary -hmac "$mp" |
+        openssl base64 |
+        cut -c1-${pwlen:-14}
+
+The salt helps when you are forced to change passwords for a domain.  It
+effectively makes the domain name different.  Note that the salt does NOT have
+to be kept secret, in terms of security.
+
+If $DISPLAY is set, this program also uses the 'xsel' command to dump the
+generated password into the X selection buffer, and then -- once you hit enter
+to confirm you're done -- to clear it out.
