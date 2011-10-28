@@ -129,7 +129,7 @@ sub write_dlist {
 # never been a "pure perl" fanatic anyway :-)
 sub read_s {
     my $in;
-    $in = `read -s foo; echo \$foo`;
+    $in = `/bin/bash -c 'read -s foo; echo \$foo'`;
     chomp($in);
     print "\n";
     return $in;
