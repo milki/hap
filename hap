@@ -1,7 +1,7 @@
 #!/usr/bin/perl
 
 # the only line you might need to change:
-my $dlist = "$ENV{HOME}/imli/private/.hashapass.dlist";
+my $dlist = "$ENV{HOME}/.config/hashapass.dlist";
 
 # Usage: $0 domain-name [password-length]
 # see bottom of file for documentation
